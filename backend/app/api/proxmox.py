@@ -97,6 +97,14 @@ async def create_resource(req: CreateRequest):
         raise HTTPException(502, f"Proxmox creation failed: {str(e)}")
 
 
+@router.get("/vms")
+async def list_vms():
+    client = await get_client()
+    vms = await client.get_all_vms()
+    await client.close()
+    return {"data": vms}
+
+
 @router.get("/task/{upid:path}")
 async def task_status(upid: str):
     client = await get_client()

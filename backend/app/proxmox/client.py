@@ -217,6 +217,15 @@ class ProxmoxClient:
         result = await self._request("POST", f"/nodes/{self.node}/{endpoint}", json=payload)
         return result
 
+    async def get_all_vms(self) -> list[dict]:
+        if self._mock:
+            return [
+                {"vmid": 100, "name": "mon-serveur", "type": "lxc", "status": "running", "cpu": 1, "mem": 1073741824, "maxmem": 2147483648, "disk": 8589934592, "maxdisk": 10737418240, "uptime": 86400},
+                {"vmid": 101, "name": "ma-vm", "type": "qemu", "status": "running", "cpu": 2, "mem": 4294967296, "maxmem": 8589934592, "disk": 34359738368, "maxdisk": 53687091200, "uptime": 3600},
+                {"vmid": 102, "name": "base-debian", "type": "lxc", "status": "stopped", "cpu": 0, "mem": 536870912, "maxmem": 1073741824, "disk": 4294967296, "maxdisk": 5368709120, "uptime": 0},
+            ]
+        return await self._request("GET", "/cluster/resources?type=vm")
+
     async def get_task_status(self, upid: str) -> dict:
         if self._mock:
             task = MOCK_TASKS.get(upid)

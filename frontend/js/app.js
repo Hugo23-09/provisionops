@@ -29,6 +29,7 @@ let state = {
   creating: false,
   result: null,
   history: [],
+  vms: [],
   connected: false,
 }
 
@@ -49,8 +50,16 @@ const MOCK = {
   nodeResources: {
     cpu_max: 16,
     memory_max: 34359738368,
+    memory_used: 12884901888,
     disk_max: 68719476736,
+    disk_used: 21474836480,
   },
+  vms: [
+    { vmid: 100, name: "proxy-web", type: "lxc", status: "running", cpu: 0.05, mem: 805306368, maxmem: 1073741824, disk: 4294967296, maxdisk: 8589934592, uptime: 86400, node: "pve" },
+    { vmid: 101, name: "base-debian", type: "lxc", status: "stopped", cpu: 0, mem: 0, maxmem: 536870912, disk: 4294967296, maxdisk: 5368709120, uptime: 0, node: "pve" },
+    { vmid: 102, name: "serveur-app", type: "qemu", status: "running", cpu: 0.5, mem: 4294967296, maxmem: 8589934592, disk: 53687091200, maxdisk: 107374182400, uptime: 604800, node: "pve" },
+    { vmid: 103, name: "docker-host", type: "qemu", status: "running", cpu: 0.8, mem: 8589934592, maxmem: 17179869184, disk: 107374182400, maxdisk: 214748364800, uptime: 1209600, node: "pve" },
+  ],
 }
 
 function escapeHtml(str) {
@@ -96,6 +105,7 @@ function setMockData() {
   state.templates = state.templatesLxc
   state.bridges = MOCK.bridges
   state.nodeResources = MOCK.nodeResources
+  state.vms = MOCK.vms
   state.storage = 'local'
   if (state.bridges.length > 0) state.bridge = state.bridges[0].iface
 }
@@ -107,11 +117,12 @@ async function tryConnect() {
     const health = await resp.json()
     if (health.status !== 'ok') throw new Error('Proxmox hors ligne')
 
-    const [templatesLxcData, templatesVmData, bridgesData, resourcesData] = await Promise.all([
+    const [templatesLxcData, templatesVmData, bridgesData, resourcesData, vmsData] = await Promise.all([
       fetch('/api/proxmox/templates?type=lxc').then(r => r.json()),
       fetch('/api/proxmox/templates?type=vm').then(r => r.json()),
       fetch('/api/proxmox/bridges').then(r => r.json()),
       fetch('/api/proxmox/resources').then(r => r.json()),
+      fetch('/api/proxmox/vms').then(r => r.json()),
     ])
 
     state.templatesLxc = templatesLxcData.data
@@ -119,6 +130,7 @@ async function tryConnect() {
     state.templates = state.templatesLxc
     state.bridges = bridgesData.data
     state.nodeResources = resourcesData.data
+    state.vms = vmsData.data || []
     state.storage = 'local'
     if (state.bridges.length > 0) state.bridge = state.bridges[0].iface
     state.connected = true
@@ -145,28 +157,62 @@ function init() {
   tryConnect()
 }
 
+function pct(a, b) {
+  return b > 0 ? Math.round((a / b) * 100) : 0
+}
+
+function barColor(pct) {
+  if (pct >= 90) return 'bg-red-500'
+  if (pct >= 70) return 'bg-amber-500'
+  return 'bg-blue-500'
+}
+
+function formatBytes(v) {
+  if (!v) return '0'
+  const gb = v / 1073741824
+  if (gb >= 1024) return (gb / 1024).toFixed(1) + ' To'
+  return gb.toFixed(1) + ' Go'
+}
+
+function formatUptime(s) {
+  if (!s || s <= 0) return '—'
+  const d = Math.floor(s / 86400)
+  const h = Math.floor((s % 86400) / 3600)
+  if (d > 0) return `${d}j ${h}h`
+  return `${h}h`
+}
+
 function renderDashboard() {
   const s = state
   const res = s.nodeResources || {}
-  const ramGb = res.memory_max ? (res.memory_max / 1073741824).toFixed(1) : '?'
-  const diskGb = res.disk_max ? (res.disk_max / 1073741824).toFixed(1) : '?'
+  const memMax = res.memory_max || 0
+  const memUsed = res.memory_used || 0
+  const diskMax = res.disk_max || 0
+  const diskUsed = res.disk_used || 0
+  const memPct = pct(memUsed, memMax)
+  const diskPct = pct(diskUsed, diskMax)
+
+  const vmsRunning = s.vms.filter(v => v.status === 'running').length
+  const vmsStopped = s.vms.filter(v => v.status === 'stopped').length
 
   return `
-    <div class="bg-gradient-to-br from-slate-800 to-slate-900 rounded-2xl p-8 shadow-lg border border-slate-700/50 mb-8 text-center">
-      <div class="flex items-center justify-center gap-3 mb-4">
-        <div class="w-14 h-14 rounded-2xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-2xl font-bold text-white shadow-lg">P</div>
-        <div class="text-left">
-          <h1 class="text-2xl font-bold text-white">ProvisionOps</h1>
-          <p class="text-sm text-slate-400">Autoservice Proxmox</p>
+    <div class="bg-gradient-to-br from-slate-800 to-slate-900 rounded-2xl p-6 shadow-lg border border-slate-700/50 mb-6">
+      <div class="flex items-center justify-between">
+        <div class="flex items-center gap-3">
+          <div class="w-11 h-11 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-lg font-bold text-white shadow">P</div>
+          <div>
+            <h1 class="text-lg font-bold text-white">ProvisionOps</h1>
+            <p class="text-xs text-slate-400">Autoservice Proxmox</p>
+          </div>
         </div>
-      </div>
-      <div class="flex items-center justify-center gap-2 mt-2">
-        ${statusBadge()}
-        <button onclick="showHistory()" class="text-xs bg-slate-700/50 hover:bg-slate-700 text-slate-300 px-2 py-0.5 rounded-full border border-slate-600/50 transition">Historique</button>
+        <div class="flex items-center gap-2">
+          ${statusBadge()}
+          <button onclick="showHistory()" class="text-xs bg-slate-700/50 hover:bg-slate-700 text-slate-300 px-2.5 py-1 rounded-lg border border-slate-600/50 transition">Historique</button>
+        </div>
       </div>
     </div>
 
-    <div class="grid grid-cols-2 md:grid-cols-5 gap-3 mb-8">
+    <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
       <div class="stat-card">
         <div class="stat-icon" style="background:#1e3a5f">&#128187;</div>
         <div class="stat-value">${s.templatesLxc.length}</div>
@@ -184,31 +230,123 @@ function renderDashboard() {
       </div>
       <div class="stat-card">
         <div class="stat-icon" style="background:#3b1e5f">&#9889;</div>
-        <div class="stat-value">${ramGb} Go</div>
-        <div class="stat-label">RAM max</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-icon" style="background:#1e5f3b">&#128190;</div>
-        <div class="stat-value">${diskGb} Go</div>
-        <div class="stat-label">Disque max</div>
+        <div class="stat-value">${vmsRunning + vmsStopped}</div>
+        <div class="stat-label">VMs <span class="text-green-400">${vmsRunning}</span>/<span class="text-slate-500">${vmsStopped}</span></div>
       </div>
     </div>
 
-    <div class="bg-gradient-to-br from-slate-800 to-slate-900 rounded-2xl p-8 shadow-lg border border-slate-700/50 text-center">
-      <h2 class="text-2xl font-bold text-white mb-2">Nouvelle ressource</h2>
-      <p class="text-slate-400 mb-8">Assistant pas-à-pas pour provisionner sur Proxmox</p>
-      <div class="flex flex-col sm:flex-row gap-4 justify-center max-w-2xl mx-auto">
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-6">
+      <div class="bg-slate-800 rounded-xl p-4 border border-slate-700/50">
+        <div class="flex items-center justify-between mb-2">
+          <span class="text-sm text-slate-300">&#128268; RAM</span>
+          <span class="text-sm text-white font-semibold">${formatBytes(memUsed)} / ${formatBytes(memMax)}</span>
+        </div>
+        <div class="h-2 bg-slate-700 rounded-full overflow-hidden">
+          <div class="h-full ${barColor(memPct)} rounded-full transition-all" style="width:${memPct}%"></div>
+        </div>
+        <div class="flex justify-between mt-1">
+          <span class="text-xs text-slate-500">${memPct}% utilisé</span>
+          <span class="text-xs text-slate-500">${100 - memPct}% libre</span>
+        </div>
+      </div>
+      <div class="bg-slate-800 rounded-xl p-4 border border-slate-700/50">
+        <div class="flex items-center justify-between mb-2">
+          <span class="text-sm text-slate-300">&#128190; Disque</span>
+          <span class="text-sm text-white font-semibold">${formatBytes(diskUsed)} / ${formatBytes(diskMax)}</span>
+        </div>
+        <div class="h-2 bg-slate-700 rounded-full overflow-hidden">
+          <div class="h-full ${barColor(diskPct)} rounded-full transition-all" style="width:${diskPct}%"></div>
+        </div>
+        <div class="flex justify-between mt-1">
+          <span class="text-xs text-slate-500">${diskPct}% utilisé</span>
+          <span class="text-xs text-slate-500">${100 - diskPct}% libre</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="bg-slate-800 rounded-xl p-5 border border-slate-700/50 mb-6">
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="text-sm font-semibold text-white">&#128187; Ressources existantes</h2>
+        <span class="text-xs text-slate-400">${s.vms.length} machine${s.vms.length > 1 ? 's' : ''}</span>
+      </div>
+      ${s.vms.length === 0 ? `
+        <p class="text-slate-500 text-sm text-center py-6">Aucune machine trouvée</p>
+      ` : `
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead>
+              <tr class="text-slate-500 text-xs border-b border-slate-700/50">
+                <th class="text-left py-2 pr-3 font-medium">VMID</th>
+                <th class="text-left py-2 pr-3 font-medium">Nom</th>
+                <th class="text-left py-2 pr-3 font-medium">Type</th>
+                <th class="text-left py-2 pr-3 font-medium">Statut</th>
+                <th class="text-left py-2 pr-3 font-medium">CPU</th>
+                <th class="text-left py-2 pr-3 font-medium">RAM</th>
+                <th class="text-left py-2 pr-3 font-medium">Disque</th>
+                <th class="text-left py-2 font-medium">Uptime</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${s.vms.map(v => {
+                const isVm = v.type === 'qemu'
+                const cpuPct = v.maxmem ? Math.round((v.cpu || 0) * 100) : 0
+                const memPctV = pct(v.mem, v.maxmem)
+                const diskPctV = pct(v.disk, v.maxdisk)
+                return `<tr class="border-b border-slate-700/30 hover:bg-slate-700/20 transition">
+                  <td class="py-2.5 pr-3 text-slate-400 font-mono text-xs">${v.vmid}</td>
+                  <td class="py-2.5 pr-3 text-white font-medium">${escapeHtml(v.name)}</td>
+                  <td class="py-2.5 pr-3">
+                    <span class="text-xs px-1.5 py-0.5 rounded ${isVm ? 'bg-indigo-900/50 text-indigo-300' : 'bg-blue-900/50 text-blue-300'}">
+                      ${isVm ? 'VM' : 'LXC'}
+                    </span>
+                  </td>
+                  <td class="py-2.5 pr-3">
+                    <span class="flex items-center gap-1.5">
+                      <span class="w-1.5 h-1.5 rounded-full ${v.status === 'running' ? 'bg-green-500' : 'bg-slate-600'}"></span>
+                      <span class="text-xs ${v.status === 'running' ? 'text-green-400' : 'text-slate-400'}">${v.status === 'running' ? 'En ligne' : 'Arrêté'}</span>
+                    </span>
+                  </td>
+                  <td class="py-2.5 pr-3 text-xs text-slate-300">${cpuPct}%</td>
+                  <td class="py-2.5 pr-3">
+                    <div class="flex items-center gap-2">
+                      <span class="text-xs text-slate-300">${formatBytes(v.mem)}</span>
+                      <div class="w-12 h-1.5 bg-slate-700 rounded-full overflow-hidden hidden sm:block">
+                        <div class="h-full ${barColor(memPctV)} rounded-full" style="width:${memPctV}%"></div>
+                      </div>
+                    </div>
+                  </td>
+                  <td class="py-2.5 pr-3">
+                    <div class="flex items-center gap-2">
+                      <span class="text-xs text-slate-300">${formatBytes(v.disk)}</span>
+                      <div class="w-12 h-1.5 bg-slate-700 rounded-full overflow-hidden hidden sm:block">
+                        <div class="h-full ${barColor(diskPctV)} rounded-full" style="width:${diskPctV}%"></div>
+                      </div>
+                    </div>
+                  </td>
+                  <td class="py-2.5 text-xs text-slate-400">${formatUptime(v.uptime)}</td>
+                </tr>`
+              }).join('')}
+            </tbody>
+          </table>
+        </div>
+      `}
+    </div>
+
+    <div class="bg-gradient-to-br from-slate-800 to-slate-900 rounded-2xl p-6 shadow-lg border border-slate-700/50 text-center">
+      <h2 class="text-lg font-bold text-white mb-1">Nouvelle ressource</h2>
+      <p class="text-sm text-slate-400 mb-6">Assistant pas-à-pas pour provisionner</p>
+      <div class="flex flex-col sm:flex-row gap-3 justify-center max-w-lg mx-auto">
         <button onclick="startWizard('lxc')"
-          class="create-card bg-gradient-to-br from-blue-600 to-blue-700 hover:from-blue-500 hover:to-blue-600 text-white font-semibold py-6 px-8 rounded-xl transition-all duration-200 shadow-lg hover:shadow-xl hover:-translate-y-0.5 flex-1">
-          <div class="text-4xl mb-3">&#9632;</div>
-          <div class="text-lg">Conteneur LXC</div>
-          <div class="text-sm text-blue-200 mt-1 font-normal">Léger, partage le noyau</div>
+          class="create-card bg-gradient-to-br from-blue-600 to-blue-700 hover:from-blue-500 hover:to-blue-600 text-white font-semibold py-5 px-6 rounded-xl transition-all duration-200 shadow hover:shadow-lg hover:-translate-y-0.5 flex-1">
+          <div class="text-3xl mb-2">&#9632;</div>
+          <div class="text-base">Conteneur LXC</div>
+          <div class="text-xs text-blue-200 mt-1 font-normal">Léger, partage le noyau</div>
         </button>
         <button onclick="startWizard('vm')"
-          class="create-card bg-gradient-to-br from-indigo-600 to-indigo-700 hover:from-indigo-500 hover:to-indigo-600 text-white font-semibold py-6 px-8 rounded-xl transition-all duration-200 shadow-lg hover:shadow-xl hover:-translate-y-0.5 flex-1">
-          <div class="text-4xl mb-3">&#9671;</div>
-          <div class="text-lg">Machine Virtuelle</div>
-          <div class="text-sm text-indigo-200 mt-1 font-normal">Isolation complète</div>
+          class="create-card bg-gradient-to-br from-indigo-600 to-indigo-700 hover:from-indigo-500 hover:to-indigo-600 text-white font-semibold py-5 px-6 rounded-xl transition-all duration-200 shadow hover:shadow-lg hover:-translate-y-0.5 flex-1">
+          <div class="text-3xl mb-2">&#9671;</div>
+          <div class="text-base">Machine Virtuelle</div>
+          <div class="text-xs text-indigo-200 mt-1 font-normal">Isolation complète</div>
         </button>
       </div>
     </div>
@@ -433,7 +571,7 @@ function renderConfirmStep() {
       <div class="border-t border-slate-600/50 pt-3 mt-3">
         <div class="flex justify-between"><span class="text-slate-400">Nom de la ${resourceLabel}</span></div>
         <input type="text" value="${escapeHtml(s.name)}" placeholder="ma-${resourceLabel}"
-          oninput="state.name=this.value"
+          oninput="state.name=this.value; render()"
           class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2.5 text-white mt-1 text-sm"
           maxlength="32" pattern="[a-z0-9-]+" autofocus>
         <p class="text-xs text-slate-500 mt-1.5">Minuscules, chiffres et tirets uniquement (max 32 car.)</p>
@@ -481,10 +619,16 @@ function renderResultStep() {
           <div class="text-sm text-green-300 font-mono break-all">${escapeHtml(s.result.upid)}</div>
         </div>
       ` : ''}
-      <button onclick="resetWizard()"
-        class="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-8 rounded-xl transition shadow-lg hover:shadow-xl">
-        Créer un autre
-      </button>
+      <div class="flex gap-3 justify-center">
+        <button onclick="resetWizard()"
+          class="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-8 rounded-xl transition shadow-lg hover:shadow-xl">
+          Créer un autre
+        </button>
+        <button onclick="init()"
+          class="bg-slate-700 hover:bg-slate-600 text-white font-semibold py-3 px-8 rounded-xl transition shadow-lg hover:shadow-xl">
+          ← Menu
+        </button>
+      </div>
     </div>
   `
 }
