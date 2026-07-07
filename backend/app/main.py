@@ -1,7 +1,10 @@
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 
 from app.api.health import router as health_router
 from app.api.proxmox import router as proxmox_router
@@ -26,3 +29,6 @@ app.add_middleware(
 app.include_router(health_router)
 app.include_router(proxmox_router)
 app.include_router(history_router)
+
+FRONTEND_DIR = "/frontend"
+app.mount("/", StaticFiles(directory=FRONTEND_DIR, html=True), name="frontend")

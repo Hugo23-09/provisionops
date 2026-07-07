@@ -9,14 +9,5 @@ services:
       - .env
     volumes:
       - ./backend:/app
-    restart: unless-stopped
-
-  frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
-    ports:
-      - "8085:80"
-    depends_on:
-      - backend
+      - ./frontend:/frontend
     restart: unless-stopped
