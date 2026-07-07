@@ -516,6 +516,66 @@ async function createResource() {
   render()
 }
 
+async function showHistory() {
+  state.step = -1
+  const app = document.getElementById('app')
+
+  try {
+    const resp = await fetch('/api/history')
+    const json = await resp.json()
+    const entries = json.data || []
+
+    app.innerHTML = `
+      <div class="bg-slate-800 rounded-xl p-6 shadow-lg border border-slate-700">
+        <div class="flex items-center justify-between mb-6">
+          <h2 class="text-xl font-semibold">Historique des créations</h2>
+          <button onclick="init()" class="text-sm text-slate-400 hover:text-white transition">← Retour</button>
+        </div>
+        ${entries.length === 0 ? `
+          <p class="text-slate-400 text-center py-8">Aucune création pour l'instant.</p>
+        ` : `
+          <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+              <thead>
+                <tr class="text-slate-400 border-b border-slate-700">
+                  <th class="text-left py-2 pr-4">Date</th>
+                  <th class="text-left py-2 pr-4">Type</th>
+                  <th class="text-left py-2 pr-4">Nom</th>
+                  <th class="text-left py-2 pr-4">CPU/RAM/Disque</th>
+                  <th class="text-left py-2">Statut</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${entries.map(e => {
+                  const date = e.created_at ? new Date(e.created_at).toLocaleString('fr-FR') : '—'
+                  const typeLabel = e.type === 'vm' ? 'VM' : 'LXC'
+                  const specs = \`\${e.cpu}c / \${(e.ram/1024).toFixed(1)}G / \${e.disk}G\`
+                  return `<tr class="border-b border-slate-700/50 hover:bg-slate-700/30">
+                    <td class="py-2 pr-4 text-slate-300 whitespace-nowrap">\${date}</td>
+                    <td class="py-2 pr-4"><span class="bg-slate-700 text-xs px-2 py-0.5 rounded">\${typeLabel}</span></td>
+                    <td class="py-2 pr-4 text-white font-medium">\${escapeHtml(e.name)}</td>
+                    <td class="py-2 pr-4 text-slate-300 text-xs">\${specs}</td>
+                    <td class="py-2">\${e.status === 'success'
+                      ? '<span class="text-green-400">✓ Succès</span>'
+                      : '<span class="text-red-400">✗ Erreur</span>'}</td>
+                  </tr>`
+                }).join('')}
+              </tbody>
+            </table>
+          </div>
+        `}
+      </div>
+    `
+  } catch {
+    app.innerHTML = `
+      <div class="bg-slate-800 rounded-xl p-6 shadow-lg border border-slate-700 text-center py-8">
+        <p class="text-red-400">Impossible de charger l'historique.</p>
+        <button onclick="init()" class="mt-4 text-sm text-slate-400 hover:text-white transition">← Retour</button>
+      </div>
+    `
+  }
+}
+
 function resetWizard() {
   state.step = 0
   state.type = null

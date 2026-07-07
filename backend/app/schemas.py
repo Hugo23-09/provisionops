@@ -64,3 +64,17 @@ class NodeResources(BaseModel):
     cpu_used: float
     memory_used: int
     disk_used: int
+
+
+class HistoryEntry(BaseModel):
+    id: int = 0
+    type: str
+    template: str
+    cpu: int
+    ram: int
+    disk: int
+    name: str
+    status: str
+    upid: Optional[str] = None
+    error: Optional[str] = None
+    created_at: str = ""

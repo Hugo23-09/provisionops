@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.health import router as health_router
 from app.api.proxmox import router as proxmox_router
+from app.api.history import router as history_router
 
 
 @asynccontextmanager
@@ -24,3 +25,4 @@ app.add_middleware(
 
 app.include_router(health_router)
 app.include_router(proxmox_router)
+app.include_router(history_router)

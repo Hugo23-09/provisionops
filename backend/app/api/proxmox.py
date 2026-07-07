@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException
-from app.schemas import CreateRequest, CreateResponse, ResourceType
+from app.schemas import CreateRequest, CreateResponse, HistoryEntry, ResourceType
 from app.proxmox.client import ProxmoxClient
+from app.api.history import add_history as _add_history
 
 router = APIRouter(prefix="/api/proxmox", tags=["proxmox"])
 
@@ -70,13 +71,29 @@ async def create_resource(req: CreateRequest):
     exists = await client.check_name_exists(req.type.value, req.name)
     if exists:
         await client.close()
+        await _add_history(HistoryEntry(
+            type=req.type.value, template=req.template,
+            cpu=req.cpu, ram=req.ram, disk=req.disk,
+            name=req.name, status="error",
+            error=f"Name '{req.name}' already exists"
+        ))
         raise HTTPException(409, f"A resource named '{req.name}' already exists")
     try:
         upid = await client.create(req.type.value, req.model_dump())
         await client.close()
+        await _add_history(HistoryEntry(
+            type=req.type.value, template=req.template,
+            cpu=req.cpu, ram=req.ram, disk=req.disk,
+            name=req.name, status="success", upid=upid
+        ))
         return CreateResponse(upid=upid, status="running")
     except Exception as e:
         await client.close()
+        await _add_history(HistoryEntry(
+            type=req.type.value, template=req.template,
+            cpu=req.cpu, ram=req.ram, disk=req.disk,
+            name=req.name, status="error", error=str(e)
+        ))
         raise HTTPException(502, f"Proxmox creation failed: {str(e)}")
 
 
