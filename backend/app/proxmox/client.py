@@ -139,7 +139,7 @@ class ProxmoxClient:
             pid = str(uuid.uuid4().int)[:8]
             pstart = str(int(time.time()))
             starttime = str(int(time.time()))
-            upid = f"UPID:{node}:{pid}:{pstart}:{starttime}:{'qemu' if type_ == 'vm' else 'lxc'}:{data.get('vmid', '100')}:root@pam!"
+            upid = f"UPID:{node}:{pid}:{pstart}:{starttime}:{'qemu' if type_ == 'vm' else 'lxc'}:100:root@pam!"
             MOCK_TASKS[upid] = {
                 "upid": upid,
                 "status": "running",
@@ -150,7 +150,6 @@ class ProxmoxClient:
 
         endpoint = "qemu" if type_ == "vm" else "lxc"
         payload = {
-            "vmid": data.get("vmid", 0),
             "name": data["name"],
             "cores": data["cpu"],
             "memory": data["ram"],

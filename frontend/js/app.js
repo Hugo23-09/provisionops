@@ -10,6 +10,8 @@ const STEPS = [
 let state = {
   step: 0,
   type: null,
+  templatesLxc: [],
+  templatesVm: [],
   templates: [],
   template: null,
   cpu: 2,
@@ -89,12 +91,15 @@ async function init() {
       return
     }
 
-    const [templatesData, bridgesData, resourcesData] = await Promise.all([
+    const [templatesLxcData, templatesVmData, bridgesData, resourcesData] = await Promise.all([
       apiFetch('/api/proxmox/templates?type=lxc'),
+      apiFetch('/api/proxmox/templates?type=vm'),
       apiFetch('/api/proxmox/bridges'),
       apiFetch('/api/proxmox/resources'),
     ])
-    state.templates = templatesData.data
+    state.templatesLxc = templatesLxcData.data
+    state.templatesVm = templatesVmData.data
+    state.templates = state.templatesLxc
     state.bridges = bridgesData.data
     state.nodeResources = resourcesData.data
     state.storage = 'local'
@@ -119,10 +124,14 @@ function renderDashboard() {
   const diskGb = res.disk_max ? (res.disk_max / 1073741824).toFixed(1) : '?'
 
   return `
-    <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+    <div class="grid grid-cols-2 md:grid-cols-5 gap-4 mb-8">
       <div class="bg-slate-800 rounded-lg p-4 text-center border border-slate-700">
         <div class="text-slate-400 text-sm">Templates LXC</div>
-        <div class="text-2xl font-bold text-white">${s.templates.length}</div>
+        <div class="text-2xl font-bold text-white">${s.templatesLxc.length}</div>
+      </div>
+      <div class="bg-slate-800 rounded-lg p-4 text-center border border-slate-700">
+        <div class="text-slate-400 text-sm">ISOs VM</div>
+        <div class="text-2xl font-bold text-white">${s.templatesVm.length}</div>
       </div>
       <div class="bg-slate-800 rounded-lg p-4 text-center border border-slate-700">
         <div class="text-slate-400 text-sm">Bridges réseau</div>
@@ -148,11 +157,12 @@ function renderDashboard() {
           <div>Conteneur LXC</div>
           <div class="text-sm text-blue-200 mt-1 font-normal">Disponible</div>
         </button>
-        <div class="wizard-card flex-1 max-w-xs mx-auto sm:mx-0 text-center disabled">
+        <button onclick="startWizard('vm')"
+          class="wizard-card flex-1 max-w-xs mx-auto sm:mx-0 text-center border-0 bg-blue-600 hover:bg-blue-700 text-white font-semibold py-4 px-6 rounded-xl transition text-lg">
           <div class="text-3xl mb-2">&#9671;</div>
           <div>Machine Virtuelle</div>
-          <div class="text-sm text-slate-500 mt-1">Bientôt disponible</div>
-        </div>
+          <div class="text-sm text-blue-200 mt-1 font-normal">Disponible</div>
+        </button>
       </div>
     </div>
   `
@@ -161,6 +171,8 @@ function renderDashboard() {
 function startWizard(type) {
   state.step = 1
   state.type = type
+  state.template = null
+  state.templates = type === 'vm' ? state.templatesVm : state.templatesLxc
   render()
 }
 
@@ -187,11 +199,10 @@ function renderTypeStep() {
         <h3 class="text-lg font-semibold">Conteneur LXC</h3>
         <p class="text-sm text-slate-400 mt-1">Léger, partage le noyau hôte. Idéal pour services et applications.</p>
       </div>
-      <div class="wizard-card disabled">
+      <div class="wizard-card ${s.type === 'vm' ? 'selected' : ''}" data-type="vm">
         <div class="text-3xl mb-2">&#9671;</div>
         <h3 class="text-lg font-semibold">Machine Virtuelle</h3>
-        <p class="text-sm text-slate-400 mt-1">Noyau dédié, isolation complète. Arrive bientôt.</p>
-        <span class="inline-block mt-2 text-xs bg-slate-700 text-slate-300 px-2 py-0.5 rounded">Sprint 4</span>
+        <p class="text-sm text-slate-400 mt-1">Noyau dédié, isolation complète. Idéal pour charges lourdes.</p>
       </div>
     </div>
     ${navButtons(s.type !== null)}
@@ -200,14 +211,15 @@ function renderTypeStep() {
 
 function renderTemplateStep() {
   const s = state
+  const label = s.type === 'lxc' ? 'template LXC' : 'ISO VM'
   if (s.templates.length === 0) {
-    return `<p class="text-slate-400">Aucun template LXC disponible.</p>${navButtons(false)}`
+    return `<p class="text-slate-400">Aucun ${label} disponible.</p>${navButtons(false)}`
   }
   return `
     <p class="text-slate-400 mb-4">Choisis le système d'exploitation :</p>
     <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 mb-6">
       ${s.templates.map(t => {
-        const name = t.volid.split('/').pop().replace(/\.tar\.(gz|zst|bz2|xz)$/, '').replace(/-standard|_amd64|_arm64/g, '')
+        const name = t.volid.split('/').pop().replace(/\.(tar\.(gz|zst|bz2|xz)|img|iso)$/, '').replace(/-standard|_amd64|_arm64/g, '')
         const isSelected = s.template && s.template.volid === t.volid
         return `<div class="template-card ${isSelected ? 'selected' : ''}" data-volid="${escapeHtml(t.volid)}">
           <div class="text-sm font-medium text-white">${escapeHtml(name)}</div>
@@ -336,10 +348,13 @@ function renderNetworkStep() {
 function renderConfirmStep() {
   const s = state
   const templateName = s.template ? s.template.volid.split('/').pop() : '—'
+  const isVm = s.type === 'vm'
+  const resourceLabel = isVm ? 'machine virtuelle' : 'conteneur'
+  const typeLabel = isVm ? 'Machine Virtuelle' : 'Conteneur LXC'
 
   return `
     <div class="bg-slate-700/50 rounded-lg p-4 space-y-3 mb-6">
-      <div class="flex justify-between"><span class="text-slate-400">Type</span><span class="text-white font-medium">Conteneur LXC</span></div>
+      <div class="flex justify-between"><span class="text-slate-400">Type</span><span class="text-white font-medium">${typeLabel}</span></div>
       <div class="flex justify-between"><span class="text-slate-400">Template</span><span class="text-white font-medium">${escapeHtml(templateName)}</span></div>
       <div class="flex justify-between"><span class="text-slate-400">CPU</span><span class="text-white font-medium">${s.cpu} cœur${s.cpu > 1 ? 's' : ''}</span></div>
       <div class="flex justify-between"><span class="text-slate-400">RAM</span><span class="text-white font-medium">${(s.ram / 1024).toFixed(1)} Go</span></div>
@@ -347,8 +362,8 @@ function renderConfirmStep() {
       <div class="flex justify-between"><span class="text-slate-400">Bridge</span><span class="text-white font-medium">${escapeHtml(s.bridge)}</span></div>
       <div class="flex justify-between"><span class="text-slate-400">IP</span><span class="text-white font-medium">${s.ipMode === 'dhcp' ? 'DHCP' : escapeHtml(s.ipAddress || '—')}</span></div>
       <div class="border-t border-slate-600 pt-3 mt-3">
-        <div class="flex justify-between"><span class="text-slate-400">Nom du conteneur</span></div>
-        <input type="text" value="${escapeHtml(s.name)}" placeholder="mon-conteneur"
+        <div class="flex justify-between"><span class="text-slate-400">Nom de la ${resourceLabel}</span></div>
+        <input type="text" value="${escapeHtml(s.name)}" placeholder="ma-${resourceLabel}"
           oninput="state.name=this.value"
           class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-white mt-1 text-sm"
           maxlength="32" pattern="[a-z0-9-]+">
@@ -359,7 +374,7 @@ function renderConfirmStep() {
     <button onclick="createResource()"
       class="w-full bg-green-600 hover:bg-green-700 text-white font-semibold py-3 px-6 rounded-lg transition text-lg ${!s.name ? 'opacity-50 cursor-not-allowed' : ''}"
       ${!s.name ? 'disabled' : ''}>
-      Créer le conteneur
+      Créer la ${resourceLabel}
     </button>
 
     <div class="flex justify-between mt-4">
@@ -381,6 +396,7 @@ function renderResultStep() {
   }
 
   const ok = s.result && s.result.status === 'running'
+  const resourceLabel = s.type === 'vm' ? 'La machine virtuelle' : 'Le conteneur'
   return `
     <div class="text-center py-8">
       <div class="text-6xl mb-4 ${ok ? 'text-green-400' : 'text-red-400'}">
@@ -388,7 +404,7 @@ function renderResultStep() {
       </div>
       <h2 class="text-2xl font-semibold mb-2">${ok ? 'Création lancée' : 'Erreur'}</h2>
       <p class="text-slate-400 mb-6">${ok
-        ? 'Le conteneur est en cours de création sur Proxmox. Tu peux suivre la tâche ci-dessous.'
+        ? `${resourceLabel} est en cours de création sur Proxmox. Tu peux suivre la tâche ci-dessous.`
         : escapeHtml(s.result?.error || 'Une erreur est survenue.')}</p>
       ${ok ? `
         <div class="bg-slate-700/50 rounded-lg p-3 mb-6 text-left">
@@ -429,6 +445,8 @@ function bindStepEvents() {
     el.addEventListener('click', () => {
       if (!el.classList.contains('disabled')) {
         state.type = el.dataset.type
+        state.template = null
+        state.templates = state.type === 'vm' ? state.templatesVm : state.templatesLxc
         render()
       }
     })
