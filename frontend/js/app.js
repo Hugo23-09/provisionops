@@ -30,10 +30,16 @@ let state = {
   result: null,
 }
 
-async function apiFetch(path) {
-  const resp = await fetch(path)
-  if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
-  return resp.json()
+async function apiFetch(path, timeoutMs = 10000) {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    const resp = await fetch(path, { signal: controller.signal })
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+    return resp.json()
+  } finally {
+    clearTimeout(timer)
+  }
 }
 
 function escapeHtml(str) {
