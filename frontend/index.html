@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ProvisionOps</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body class="bg-gray-100 min-h-screen">
+  <header class="bg-slate-800 text-white shadow-lg">
+    <div class="max-w-4xl mx-auto px-4 py-4 flex items-center gap-3">
+      <h1 class="text-xl font-bold">ProvisionOps</h1>
+      <span class="text-sm text-slate-400">Provisionnement self-service Proxmox</span>
+    </div>
+  </header>
+
+  <main class="max-w-4xl mx-auto px-4 py-8">
+    <div id="app" class="bg-white rounded-xl shadow-md p-6">
+      <div class="text-center py-12">
+        <div class="text-slate-400 text-lg mb-2">Chargement...</div>
+        <div class="animate-spin h-8 w-8 border-4 border-slate-300 border-t-slate-600 rounded-full mx-auto"></div>
+      </div>
+    </div>
+  </main>
+
+  <script src="js/app.js"></script>
+</body>
+</html>
