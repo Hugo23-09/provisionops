@@ -226,6 +226,20 @@ class ProxmoxClient:
             ]
         return await self._request("GET", "/cluster/resources?type=vm")
 
+    async def vm_action(self, type_: str, vmid: int, action: str) -> str:
+        if self._mock:
+            return "UPID:mock:action"
+        if action not in ("start", "stop", "shutdown"):
+            raise ValueError(f"Invalid action: {action}")
+        ep = "qemu" if type_ == "vm" else "lxc"
+        return await self._request("POST", f"/nodes/{self.node}/{ep}/{vmid}/status/{action}")
+
+    async def vm_delete(self, type_: str, vmid: int) -> None:
+        if self._mock:
+            return
+        ep = "qemu" if type_ == "vm" else "lxc"
+        await self._request("DELETE", f"/nodes/{self.node}/{ep}/{vmid}")
+
     async def get_task_status(self, upid: str) -> dict:
         if self._mock:
             task = MOCK_TASKS.get(upid)

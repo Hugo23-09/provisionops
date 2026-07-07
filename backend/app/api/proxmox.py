@@ -111,3 +111,45 @@ async def task_status(upid: str):
     status = await client.get_task_status(upid)
     await client.close()
     return {"data": status}
+
+
+@router.post("/{type_}/{vmid}/start")
+async def start_vm(type_: str, vmid: int):
+    if type_ not in ("lxc", "vm"):
+        raise HTTPException(400, "type must be 'lxc' or 'vm'")
+    client = await get_client()
+    try:
+        upid = await client.vm_action(type_, vmid, "start")
+        return {"status": "ok", "upid": upid}
+    except Exception as e:
+        raise HTTPException(502, str(e))
+    finally:
+        await client.close()
+
+
+@router.post("/{type_}/{vmid}/stop")
+async def stop_vm(type_: str, vmid: int):
+    if type_ not in ("lxc", "vm"):
+        raise HTTPException(400, "type must be 'lxc' or 'vm'")
+    client = await get_client()
+    try:
+        upid = await client.vm_action(type_, vmid, "stop")
+        return {"status": "ok", "upid": upid}
+    except Exception as e:
+        raise HTTPException(502, str(e))
+    finally:
+        await client.close()
+
+
+@router.delete("/{type_}/{vmid}")
+async def delete_vm(type_: str, vmid: int):
+    if type_ not in ("lxc", "vm"):
+        raise HTTPException(400, "type must be 'lxc' or 'vm'")
+    client = await get_client()
+    try:
+        await client.vm_delete(type_, vmid)
+        return {"status": "deleted"}
+    except Exception as e:
+        raise HTTPException(502, str(e))
+    finally:
+        await client.close()
