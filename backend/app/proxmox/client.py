@@ -29,9 +29,10 @@ MOCK_BRIDGES = [
 ]
 
 MOCK_NODE_STATUS = {
-    "cpu": {"max": 16, "used": 4.5},
-    "memory": {"max": 68719476736, "used": 25769803776},
-    "root": {"total": 2000000000000, "used": 536870912000, "avail": 1463129088000},
+    "cpu": 0.1,
+    "cpuinfo": {"cpus": 16, "cores": 8},
+    "memory": {"total": 68719476736, "used": 25769803776},
+    "rootfs": {"total": 2000000000000, "used": 536870912000, "avail": 1463129088000},
 }
 
 MOCK_TASKS: dict = {}
@@ -49,7 +50,6 @@ class ProxmoxClient:
         self._mock = settings.is_mock
 
         if not self._mock:
-            transport = httpx.AsyncHTTPTransport(retries=2)
             self._client = httpx.AsyncClient(
                 base_url=self.base_url,
                 headers={
@@ -57,7 +57,6 @@ class ProxmoxClient:
                 },
                 verify=False,
                 timeout=self.timeout,
-                transport=transport,
             )
         else:
             self._client = None
@@ -78,6 +77,15 @@ class ProxmoxClient:
                 if e.response.status_code >= 500 and attempt < 2:
                     await asyncio.sleep(2 ** attempt)
                 else:
+                    try:
+                        detail = e.response.json()
+                        if "errors" in detail:
+                            raise httpx.HTTPStatusError(
+                                f"{e.response.reason_phrase} - {detail.get('message', '')} - {detail['errors']}",
+                                request=e.request, response=e.response,
+                            )
+                    except (ValueError, KeyError):
+                        pass
                     raise
         raise last_error
 
@@ -126,6 +134,22 @@ class ProxmoxClient:
             return dict(MOCK_NODE_STATUS)
         return await self._request("GET", f"/nodes/{self.node}/status")
 
+    async def _get_next_vmid(self) -> int:
+        if self._mock:
+            return 100
+        data = await self._request("GET", "/cluster/resources?type=vm")
+        used = [r["vmid"] for r in data if "vmid" in r]
+        return max(used) + 1 if used else 100
+
+    async def _get_rootfs_storage(self) -> str:
+        if self._mock:
+            return "local"
+        storages = await self.get_storages()
+        for s in storages:
+            if "rootdir" in s.get("content", ""):
+                return s["storage"]
+        return "local"
+
     async def check_name_exists(self, type_: str, name: str) -> bool:
         if self._mock:
             return name in MOCK_EXISTING_NAMES
@@ -139,7 +163,7 @@ class ProxmoxClient:
             pid = str(uuid.uuid4().int)[:8]
             pstart = str(int(time.time()))
             starttime = str(int(time.time()))
-            upid = f"UPID:{node}:{pid}:{pstart}:{starttime}:{'qemu' if type_ == 'vm' else 'lxc'}:100:root@pam!"
+            upid = f"UPID:{node}:{pid}:{pstart}:{starttime}:{'qemu' if type_ == 'vm' else 'lxc'}:{data.get('vmid', '100')}:root@pam!"
             MOCK_TASKS[upid] = {
                 "upid": upid,
                 "status": "running",
@@ -149,24 +173,46 @@ class ProxmoxClient:
             return upid
 
         endpoint = "qemu" if type_ == "vm" else "lxc"
-        payload = {
-            "name": data["name"],
-            "cores": data["cpu"],
-            "memory": data["ram"],
-            "storage": data["storage"],
-            "net0": f"model=virtio,bridge={data['bridge']}",
-        }
+        ip_config = data.get("ip_config", "")
+        vmid = await self._get_next_vmid()
 
         if type_ == "vm":
-            payload["ide2"] = f"{data['template']},media=cdrom"
-            payload["scsihw"] = "virtio-scsi-pci"
-            payload["virtio0"] = f"{data['storage']}:{data['disk']}"
+            net0 = f"model=virtio,bridge={data['bridge']}"
+            if ip_config and ip_config != "dhcp":
+                net0 += f",ip={ip_config}"
+            payload = {
+                "vmid": vmid,
+                "name": data["name"],
+                "cores": data["cpu"],
+                "memory": data["ram"],
+                "net0": net0,
+                "ide2": f"{data['template']},media=cdrom",
+                "scsihw": "virtio-scsi-pci",
+                "virtio0": f"{data['storage']}:{data['disk']}",
+                "storage": data["storage"],
+            }
         else:
-            payload["ostemplate"] = data["template"]
-            payload["rootfs"] = f"{data['storage']}:{data['disk']}"
-
-        if data.get("ip_config"):
-            payload["net0"] += f",ip={data['ip_config']}"
+            net0 = f"name=eth0,bridge={data['bridge']}"
+            if ip_config and ip_config != "dhcp":
+                net0 += f",ip={ip_config}"
+            else:
+                net0 += ",ip=dhcp"
+            try:
+                rootfs_storage = await self._get_rootfs_storage()
+            except Exception:
+                rootfs_storage = data.get("storage", "local")
+            payload = {
+                "vmid": vmid,
+                "hostname": data["name"],
+                "cores": data["cpu"],
+                "memory": data["ram"],
+                "ostemplate": data["template"],
+                "rootfs": f"{rootfs_storage}:{data['disk']}",
+                "net0": net0,
+                "password": "provisionops",
+                "unprivileged": 1,
+                "force": 1,
+            }
 
         result = await self._request("POST", f"/nodes/{self.node}/{endpoint}", json=payload)
         return result

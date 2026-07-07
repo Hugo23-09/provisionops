@@ -50,14 +50,14 @@ async def node_resources():
     client = await get_client()
     resources = await client.get_resources()
     await client.close()
-    cpu = resources.get("cpu", {})
+    cpuinfo = resources.get("cpuinfo", {})
     memory = resources.get("memory", {})
-    root = resources.get("root", {})
+    root = resources.get("rootfs", {})
     return {
         "data": {
-            "cpu_max": cpu.get("max", 0),
-            "cpu_used": cpu.get("used", 0),
-            "memory_max": memory.get("max", 0),
+            "cpu_max": cpuinfo.get("cpus", 0),
+            "cpu_used": resources.get("cpu", 0),
+            "memory_max": memory.get("total", 0),
             "memory_used": memory.get("used", 0),
             "disk_max": root.get("total", 0),
             "disk_used": root.get("used", 0),
