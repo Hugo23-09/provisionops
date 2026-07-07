@@ -28,18 +28,7 @@ let state = {
   nodeResources: null,
   creating: false,
   result: null,
-}
-
-async function apiFetch(path, timeoutMs = 10000) {
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), timeoutMs)
-  try {
-    const resp = await fetch(path, { signal: controller.signal })
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
-    return resp.json()
-  } finally {
-    clearTimeout(timer)
-  }
+  history: [],
 }
 
 function escapeHtml(str) {
@@ -79,48 +68,37 @@ function render() {
   bindStepEvents()
 }
 
-async function init() {
+const MOCK = {
+  templatesLxc: [
+    { volid: "local:vztmpl/debian-12-standard_12.7-1_amd64.tar.zst", size: 235929600 },
+    { volid: "local:vztmpl/ubuntu-24.04-standard_24.04-2_amd64.tar.zst", size: 268435456 },
+    { volid: "local:vztmpl/alpine-3.21-default_20250108_amd64.tar.xz", size: 8388608 },
+  ],
+  templatesVm: [
+    { volid: "local:iso/debian-12.10.0-amd64-netinst.iso", size: 734003200 },
+    { volid: "local:iso/ubuntu-24.04.1-live-server-amd64.iso", size: 1610612736 },
+  ],
+  bridges: [
+    { iface: "vmbr0", cidr: "192.168.1.0/24" },
+    { iface: "vmbr1", cidr: "10.0.0.0/24" },
+  ],
+  nodeResources: {
+    cpu_max: 16,
+    memory_max: 34359738368,
+    disk_max: 68719476736,
+  },
+}
+
+function init() {
   const app = document.getElementById('app')
-
-  try {
-    const health = await apiFetch('/api/proxmox/health')
-
-    if (health.status !== 'ok') {
-      app.innerHTML = `
-        <div class="bg-slate-800 rounded-xl p-6 shadow-lg border border-slate-700 text-center py-12">
-          <div class="text-red-400 text-6xl mb-4">&#10007;</div>
-          <h2 class="text-2xl font-semibold">Proxmox indisponible</h2>
-          <p class="text-slate-400 mt-2">Impossible de contacter le serveur Proxmox.</p>
-          <p class="text-slate-500 text-sm mt-1">Vérifie les paramètres dans le fichier .env</p>
-        </div>
-      `
-      return
-    }
-
-    const [templatesLxcData, templatesVmData, bridgesData, resourcesData] = await Promise.all([
-      apiFetch('/api/proxmox/templates?type=lxc'),
-      apiFetch('/api/proxmox/templates?type=vm'),
-      apiFetch('/api/proxmox/bridges'),
-      apiFetch('/api/proxmox/resources'),
-    ])
-    state.templatesLxc = templatesLxcData.data
-    state.templatesVm = templatesVmData.data
-    state.templates = state.templatesLxc
-    state.bridges = bridgesData.data
-    state.nodeResources = resourcesData.data
-    state.storage = 'local'
-    if (state.bridges.length > 0) state.bridge = state.bridges[0].iface
-
-    render()
-  } catch {
-    app.innerHTML = `
-      <div class="bg-slate-800 rounded-xl p-6 shadow-lg border border-slate-700 text-center py-12">
-        <div class="text-red-400 text-6xl mb-4">&#10007;</div>
-        <h2 class="text-2xl font-semibold">Erreur de connexion</h2>
-        <p class="text-slate-400 mt-2">Impossible de contacter l'API backend.</p>
-      </div>
-    `
-  }
+  state.templatesLxc = MOCK.templatesLxc
+  state.templatesVm = MOCK.templatesVm
+  state.templates = state.templatesLxc
+  state.bridges = MOCK.bridges
+  state.nodeResources = MOCK.nodeResources
+  state.storage = 'local'
+  if (state.bridges.length > 0) state.bridge = state.bridges[0].iface
+  render()
 }
 
 function renderDashboard() {
@@ -483,103 +461,79 @@ function prevStep() {
   }
 }
 
-async function createResource() {
+function createResource() {
   const s = state
   if (!s.name) return
-
-  const ipConfig = s.ipMode === 'static' && s.ipAddress
-    ? `${s.ipAddress}/${s.ipMask || '24'}${s.ipGateway ? ',' + s.ipGateway : ''}`
-    : 'dhcp'
 
   s.creating = true
   s.step = 6
   render()
 
-  try {
-    const resp = await fetch('/api/proxmox/create', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        type: s.type,
-        template: s.template.volid,
-        cpu: s.cpu,
-        ram: s.ram,
-        disk: s.disk,
-        storage: s.storage,
-        bridge: s.bridge,
-        name: s.name,
-        ip_config: ipConfig,
-      }),
+  setTimeout(() => {
+    s.result = {
+      status: 'running',
+      upid: `UPID:mock:00000000:${Date.now().toString(36)}:vzcreate:${Math.floor(Math.random() * 900 + 100)}:root@pam!`,
+    }
+    state.history.unshift({
+      created_at: new Date().toISOString(),
+      type: s.type,
+      name: s.name,
+      cpu: s.cpu,
+      ram: s.ram,
+      disk: s.disk,
+      status: 'success',
     })
-    const data = await resp.json()
-    if (!resp.ok) throw new Error(data.detail || 'Erreur serveur')
-    s.result = data
-  } catch (e) {
-    s.result = { status: 'error', error: e.message }
-  }
-
-  s.creating = false
-  render()
+    s.creating = false
+    render()
+  }, 2000)
 }
 
-async function showHistory() {
+function showHistory() {
   state.step = -1
   const app = document.getElementById('app')
+  const entries = state.history || []
 
-  try {
-    const resp = await fetch('/api/history')
-    const json = await resp.json()
-    const entries = json.data || []
-
-    app.innerHTML = `
-      <div class="bg-slate-800 rounded-xl p-6 shadow-lg border border-slate-700">
-        <div class="flex items-center justify-between mb-6">
-          <h2 class="text-xl font-semibold">Historique des créations</h2>
-          <button onclick="init()" class="text-sm text-slate-400 hover:text-white transition">← Retour</button>
+  app.innerHTML = `
+    <div class="bg-slate-800 rounded-xl p-6 shadow-lg border border-slate-700">
+      <div class="flex items-center justify-between mb-6">
+        <h2 class="text-xl font-semibold">Historique des créations</h2>
+        <button onclick="init()" class="text-sm text-slate-400 hover:text-white transition">← Retour</button>
+      </div>
+      ${entries.length === 0 ? `
+        <p class="text-slate-400 text-center py-8">Aucune création pour l'instant.</p>
+      ` : `
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead>
+              <tr class="text-slate-400 border-b border-slate-700">
+                <th class="text-left py-2 pr-4">Date</th>
+                <th class="text-left py-2 pr-4">Type</th>
+                <th class="text-left py-2 pr-4">Nom</th>
+                <th class="text-left py-2 pr-4">CPU/RAM/Disque</th>
+                <th class="text-left py-2">Statut</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${entries.map(e => {
+                const date = e.created_at ? new Date(e.created_at).toLocaleString('fr-FR') : '—'
+                const typeLabel = e.type === 'vm' ? 'VM' : 'LXC'
+                const specs = `${e.cpu}c / ${(e.ram/1024).toFixed(1)}G / ${e.disk}G`
+                return `<tr class="border-b border-slate-700/50 hover:bg-slate-700/30">
+                  <td class="py-2 pr-4 text-slate-300 whitespace-nowrap">${date}</td>
+                  <td class="py-2 pr-4"><span class="bg-slate-700 text-xs px-2 py-0.5 rounded">${typeLabel}</span></td>
+                  <td class="py-2 pr-4 text-white font-medium">${escapeHtml(e.name)}</td>
+                  <td class="py-2 pr-4 text-slate-300 text-xs">${specs}</td>
+                  <td class="py-2">${e.status === 'success'
+                    ? '<span class="text-green-400">✓ Succès</span>'
+                    : '<span class="text-red-400">✗ Erreur</span>'}</td>
+                </tr>`
+              }).join('')}
+            </tbody>
+          </table>
         </div>
-        ${entries.length === 0 ? `
-          <p class="text-slate-400 text-center py-8">Aucune création pour l'instant.</p>
-        ` : `
-          <div class="overflow-x-auto">
-            <table class="w-full text-sm">
-              <thead>
-                <tr class="text-slate-400 border-b border-slate-700">
-                  <th class="text-left py-2 pr-4">Date</th>
-                  <th class="text-left py-2 pr-4">Type</th>
-                  <th class="text-left py-2 pr-4">Nom</th>
-                  <th class="text-left py-2 pr-4">CPU/RAM/Disque</th>
-                  <th class="text-left py-2">Statut</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${entries.map(e => {
-                  const date = e.created_at ? new Date(e.created_at).toLocaleString('fr-FR') : '—'
-                  const typeLabel = e.type === 'vm' ? 'VM' : 'LXC'
-                  const specs = \`\${e.cpu}c / \${(e.ram/1024).toFixed(1)}G / \${e.disk}G\`
-                  return `<tr class="border-b border-slate-700/50 hover:bg-slate-700/30">
-                    <td class="py-2 pr-4 text-slate-300 whitespace-nowrap">\${date}</td>
-                    <td class="py-2 pr-4"><span class="bg-slate-700 text-xs px-2 py-0.5 rounded">\${typeLabel}</span></td>
-                    <td class="py-2 pr-4 text-white font-medium">\${escapeHtml(e.name)}</td>
-                    <td class="py-2 pr-4 text-slate-300 text-xs">\${specs}</td>
-                    <td class="py-2">\${e.status === 'success'
-                      ? '<span class="text-green-400">✓ Succès</span>'
-                      : '<span class="text-red-400">✗ Erreur</span>'}</td>
-                  </tr>`
-                }).join('')}
-              </tbody>
-            </table>
-          </div>
-        `}
-      </div>
-    `
-  } catch {
-    app.innerHTML = `
-      <div class="bg-slate-800 rounded-xl p-6 shadow-lg border border-slate-700 text-center py-8">
-        <p class="text-red-400">Impossible de charger l'historique.</p>
-        <button onclick="init()" class="mt-4 text-sm text-slate-400 hover:text-white transition">← Retour</button>
-      </div>
-    `
-  }
+      `}
+    </div>
+  `
 }
 
 function resetWizard() {
