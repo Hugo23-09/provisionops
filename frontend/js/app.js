@@ -30,6 +30,7 @@ let state = {
   result: null,
   history: [],
   vms: [],
+  vmid: null,
   connected: false,
 }
 
@@ -545,12 +546,18 @@ function renderNetworkStep() {
   `
 }
 
+function nextVmid() {
+  const ids = state.vms.map(v => v.vmid).filter(id => id)
+  return ids.length > 0 ? Math.max(...ids) + 1 : 100
+}
+
 function renderConfirmStep() {
   const s = state
   const templateName = s.template ? s.template.volid.split('/').pop() : '—'
   const isVm = s.type === 'vm'
   const resourceLabel = isVm ? 'machine virtuelle' : 'conteneur'
   const typeLabel = isVm ? 'Machine Virtuelle' : 'Conteneur LXC'
+  if (!s.vmid) state.vmid = nextVmid()
 
   return `
     <div class="bg-slate-700/50 rounded-xl p-5 space-y-3 mb-6">
@@ -568,13 +575,23 @@ function renderConfirmStep() {
       <div class="flex justify-between"><span class="text-slate-400">Disque</span><span class="text-white font-medium">${s.disk} Go</span></div>
       <div class="flex justify-between"><span class="text-slate-400">Bridge</span><span class="text-white font-medium">${escapeHtml(s.bridge)}</span></div>
       <div class="flex justify-between"><span class="text-slate-400">IP</span><span class="text-white font-medium">${s.ipMode === 'dhcp' ? 'DHCP' : escapeHtml(s.ipAddress || '—')}</span></div>
-      <div class="border-t border-slate-600/50 pt-3 mt-3">
-        <div class="flex justify-between"><span class="text-slate-400">Nom de la ${resourceLabel}</span></div>
-        <input type="text" value="${escapeHtml(s.name)}" placeholder="ma-${resourceLabel}"
-          oninput="state.name=this.value; render()"
-          class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2.5 text-white mt-1 text-sm"
-          maxlength="32" pattern="[a-z0-9-]+" autofocus>
-        <p class="text-xs text-slate-500 mt-1.5">Minuscules, chiffres et tirets uniquement (max 32 car.)</p>
+      <div class="border-t border-slate-600/50 pt-3 mt-3 space-y-3">
+        <div>
+          <div class="flex justify-between"><span class="text-slate-400">VMID</span></div>
+          <input type="number" value="${s.vmid || nextVmid()}" min="100" max="999999999"
+            onchange="state.vmid=+this.value; render()"
+            class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2.5 text-white mt-1 text-sm"
+            autofocus>
+          <p class="text-xs text-slate-500 mt-1">Laisse la valeur suggérée ou choisis un numéro libre</p>
+        </div>
+        <div>
+          <div class="flex justify-between"><span class="text-slate-400">Nom de la ${resourceLabel}</span></div>
+          <input type="text" value="${escapeHtml(s.name)}" placeholder="ma-${resourceLabel}"
+            oninput="state.name=this.value; render()"
+            class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2.5 text-white mt-1 text-sm"
+            maxlength="32" pattern="[a-z0-9-]+">
+          <p class="text-xs text-slate-500 mt-1.5">Minuscules, chiffres et tirets uniquement (max 32 car.)</p>
+        </div>
       </div>
     </div>
 
@@ -594,10 +611,26 @@ function renderResultStep() {
   const s = state
   if (s.creating) {
     return `
-      <div class="text-center py-12">
-        <div class="animate-spin h-14 w-14 border-4 border-blue-500 border-t-transparent rounded-full mx-auto mb-5"></div>
-        <p class="text-lg text-slate-300">Création en cours...</p>
-        <p class="text-sm text-slate-500 mt-2">Provisionnement sur Proxmox</p>
+      <div class="text-center py-10">
+        <div class="relative inline-flex mb-6">
+          <div class="animate-spin h-16 w-16 border-4 border-blue-500/30 border-t-blue-500 rounded-full"></div>
+          <div class="absolute inset-0 flex items-center justify-center">
+            <span class="text-2xl">&#9889;</span>
+          </div>
+        </div>
+        <p class="text-xl font-semibold text-white mb-2">Création en cours...</p>
+        <p class="text-sm text-slate-400 mb-2">Provisionnement sur Proxmox</p>
+        <div class="flex items-center justify-center gap-2 text-xs text-slate-500 mt-4">
+          <span>VMID ${s.vmid || '—'}</span>
+          <span class="w-1 h-1 bg-slate-600 rounded-full"></span>
+          <span>${s.type === 'vm' ? 'VM' : 'LXC'}</span>
+          <span class="w-1 h-1 bg-slate-600 rounded-full"></span>
+          <span>${escapeHtml(s.name || '—')}</span>
+        </div>
+        <div class="mt-6">
+          <button onclick="init()"
+            class="text-sm text-slate-400 hover:text-white transition">← Annuler et retourner au menu</button>
+        </div>
       </div>
     `
   }
@@ -611,7 +644,7 @@ function renderResultStep() {
       </div>
       <h2 class="text-2xl font-bold mb-2">${ok ? 'Création lancée' : 'Erreur'}</h2>
       <p class="text-slate-400 mb-6 max-w-md mx-auto">${ok
-        ? `${resourceLabel} est en cours de création sur Proxmox.`
+        ? `${resourceLabel} (VMID ${s.vmid}) est en cours de création sur Proxmox.`
         : escapeHtml(s.result?.error || 'Une erreur est survenue.')}</p>
       ${ok ? `
         <div class="bg-slate-700/50 rounded-xl p-4 mb-6 text-left max-w-lg mx-auto">
@@ -695,7 +728,7 @@ function createResource() {
     setTimeout(() => {
       s.result = {
         status: 'running',
-        upid: `UPID:mock:00000000:${Date.now().toString(36)}:vzcreate:${Math.floor(Math.random() * 900 + 100)}:root@pam!`,
+        upid: `UPID:mock:00000000:${Date.now().toString(36)}:vzcreate:${s.vmid || Math.floor(Math.random() * 900 + 100)}:root@pam!`,
       }
       state.history.unshift({
         created_at: new Date().toISOString(),
@@ -704,6 +737,7 @@ function createResource() {
         cpu: s.cpu,
         ram: s.ram,
         disk: s.disk,
+        vmid: s.vmid,
         status: 'success',
       })
       s.creating = false
@@ -733,6 +767,7 @@ function createResource() {
       bridge: s.bridge,
       name: s.name,
       ip_config: ipConfig,
+      vmid: s.vmid,
     }),
   })
     .then(async resp => {
@@ -746,6 +781,7 @@ function createResource() {
         cpu: s.cpu,
         ram: s.ram,
         disk: s.disk,
+        vmid: s.vmid,
         status: 'success',
       })
     })
@@ -777,6 +813,7 @@ function showHistory() {
             <thead>
               <tr class="text-slate-400 border-b border-slate-700">
                 <th class="text-left py-2.5 pr-4">Date</th>
+                <th class="text-left py-2.5 pr-4">VMID</th>
                 <th class="text-left py-2.5 pr-4">Type</th>
                 <th class="text-left py-2.5 pr-4">Nom</th>
                 <th class="text-left py-2.5 pr-4">CPU/RAM/Disque</th>
@@ -790,6 +827,7 @@ function showHistory() {
                 const specs = `${e.cpu}c / ${(e.ram/1024).toFixed(1)}G / ${e.disk}G`
                 return `<tr class="border-b border-slate-700/50 hover:bg-slate-700/20 transition">
                   <td class="py-2.5 pr-4 text-slate-300 whitespace-nowrap">${date}</td>
+                  <td class="py-2.5 pr-4 text-slate-400 font-mono text-xs">${e.vmid || '—'}</td>
                   <td class="py-2.5 pr-4"><span class="bg-slate-700 text-xs px-2 py-0.5 rounded">${typeLabel}</span></td>
                   <td class="py-2.5 pr-4 text-white font-medium">${escapeHtml(e.name)}</td>
                   <td class="py-2.5 pr-4 text-slate-300 text-xs">${specs}</td>
@@ -819,6 +857,7 @@ function resetWizard() {
   state.ipMask = ''
   state.ipGateway = ''
   state.name = ''
+  state.vmid = null
   state.creating = false
   state.result = null
   render()

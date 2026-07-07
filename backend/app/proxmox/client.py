@@ -174,7 +174,7 @@ class ProxmoxClient:
 
         endpoint = "qemu" if type_ == "vm" else "lxc"
         ip_config = data.get("ip_config", "")
-        vmid = await self._get_next_vmid()
+        vmid = data.get("vmid") or await self._get_next_vmid()
 
         if type_ == "vm":
             net0 = f"model=virtio,bridge={data['bridge']}"

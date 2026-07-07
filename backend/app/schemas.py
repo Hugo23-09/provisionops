@@ -19,6 +19,7 @@ class CreateRequest(BaseModel):
     bridge: str = Field(min_length=1)
     name: str = Field(min_length=1, max_length=32)
     ip_config: Optional[str] = None
+    vmid: Optional[int] = Field(None, ge=100, le=999999999)
 
     @field_validator("name")
     @classmethod
